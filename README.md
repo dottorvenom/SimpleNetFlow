@@ -162,6 +162,4 @@ Before publishing the repository on GitHub, it is recommended to add:
 - PNG export
 - support for NetFlow-style stream analysis
 
-## License
 
-This repository does not currently include a license file. Add one before publishing it publicly on GitHub if you want to define the usage terms clearly.
