@@ -1,5 +1,9 @@
 # SimpleNetFlow
 
+<p align="center">
+  <img src="img/img1.png" alt="SimpleNetFlow preview" width="900">
+</p>
+
 A lightweight web application for uploading PCAP and PCAPNG capture files, extracting IP conversations, and visualizing the communication graph in a navigable SVG diagram.
 
 The project is built with Python and Flask, and it is designed to run locally or in Docker for quick packet inspection and traffic analysis.
