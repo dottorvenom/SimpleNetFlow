@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PCAP IP Graph</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body data-max-mb="{{ max_upload_mb }}">
+    <div class="page-shell">
+      <header class="topbar">
+        <p class="eyebrow">Prima release</p>
+        <h1>NetFlow / PCAP visualizer</h1>
+      </header>
+
+      <div id="browser-banner" class="browser-banner" hidden></div>
+
+      <main class="layout">
+        <section class="panel upload-panel">
+          <h2>Carica un file PCAP</h2>
+
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Seleziona o trascina un file pcap">
+            <p><strong>Trascina qui</strong> il file .pcap / .pcapng</p>
+            <p class="muted">oppure</p>
+            <button type="button" id="pick-button">Scegli file…</button>
+            <input id="pcap-file" class="visually-hidden" type="file" accept=".pcap,.pcapng,.cap,.gz,application/octet-stream" tabindex="-1" />
+          </div>
+
+          <div id="progress" class="progress" hidden>
+            <div class="progress-bar"><div id="progress-fill"></div></div>
+            <div id="progress-label" class="muted"></div>
+          </div>
+
+          <div id="messages"></div>
+
+          <div id="meta" class="meta-box" hidden></div>
+          <div id="stats" class="stats-grid" hidden></div>
+
+          <div id="protocols-panel" class="protocols-panel" hidden>
+            <h3>Protocolli rilevati</h3>
+            <label class="muted" for="protocol-list">Filtra mappa per protocollo</label>
+            <select id="protocol-list" class="protocol-select">
+              <option value="all">ALL</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Grafico degli IP</h2>
+            <div class="zoom-controls" aria-label="Zoom sul grafico">
+              <button type="button" data-action="zoom-in">+</button>
+              <button type="button" data-action="zoom-out">−</button>
+              <button type="button" data-action="reset">Reset</button>
+              <button type="button" data-action="download" id="download-button" disabled>Scarica SVG</button>
+            </div>
+          </div>
+
+          <div class="graph-stage" id="graph-stage">
+            <div class="empty-state" id="empty-state">Nessun grafico generato. Carica un file PCAP per iniziare.</div>
+            <div class="svg-wrapper" id="svg-wrapper" hidden></div>
+          </div>
+        </section>
+      </main>
+
+      <section class="panel tables-panel" id="tables-panel" hidden>
+        <div class="table-split">
+          <div>
+            <h3>Elenco IP</h3>
+            <div class="list-box" id="ip-list"></div>
+          </div>
+          <div>
+            <h3>Connessioni principali</h3>
+            <table>
+              <thead>
+                <tr><th>Origine</th><th>Destinazione</th><th>Pacchetti</th></tr>
+              </thead>
+              <tbody id="edge-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js', v='4') }}"></script>
+  </body>
+</html>

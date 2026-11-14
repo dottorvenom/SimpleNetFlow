@@ -1,0 +1,17 @@
+services:
+  netflow-visualizer:
+    build: .
+    container_name: netflow-visualizer
+    ports:
+      - "9977:9977"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PORT: "9977"
+      MAX_UPLOAD_MB: "2048"  # 2 GiB per catture grandi
+      UPLOAD_DIR: "/app/uploads"
+    volumes:
+      - pcap_uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  pcap_uploads:
