@@ -78,6 +78,41 @@ class TestParser(unittest.TestCase):
         self.assertIn({"source": "10.0.0.3", "target": "10.0.0.1", "weight": 1}, result["edges"])
         self.assertEqual(result["edges"][0]["weight"], 2)  # ordinati per peso
 
+    def test_build_ip_edges_sorts_ips_increasing_order(self):
+        data = [
+            ("10.0.0.10", "10.0.0.2"),
+            ("192.168.1.1", "10.0.0.1"),
+            ("10.0.0.2", "192.168.1.1"),
+        ]
+        result = build_ip_edges(data)
+        self.assertEqual(result["nodes"], ["10.0.0.1", "10.0.0.2", "10.0.0.10", "192.168.1.1"])
+
+    def test_build_ip_edges_keeps_three_digit_first_octet(self):
+        data = [
+            ("172.16.0.5", "100.64.0.1"),
+            ("10.0.0.1", "172.16.0.10"),
+            ("100.64.0.2", "10.0.0.2"),
+        ]
+        result = build_ip_edges(data)
+        self.assertEqual(result["nodes"], ["10.0.0.1", "10.0.0.2", "100.64.0.1", "100.64.0.2", "172.16.0.5", "172.16.0.10"])
+
+    def test_result_exposes_full_ip_select_options(self):
+        import app as app_module
+        old_limit = app_module.MAX_PILLS
+        app_module.MAX_PILLS = 2
+        try:
+            pk = [
+                eth(ipv4("10.0.0.1", "100.64.0.1")),
+                eth(ipv4("10.0.0.2", "172.16.0.5")),
+                eth(ipv4("10.0.0.3", "192.168.0.7")),
+            ]
+            st = parse_bytes(pcap_file(pk))
+            result = app_module.build_result("x.pcap", 1, st)
+            self.assertEqual(result["nodes"], ["10.0.0.1", "10.0.0.2"])
+            self.assertEqual(result["ip_options"], ["10.0.0.1", "10.0.0.2", "10.0.0.3", "100.64.0.1", "172.16.0.5", "192.168.0.7"])
+        finally:
+            app_module.MAX_PILLS = old_limit
+
     def test_pcap_ethernet_v4_v6_vlan(self):
         pk = [
             eth(ipv4("10.0.0.1", "10.0.0.2")),
@@ -149,6 +184,18 @@ class TestApi(unittest.TestCase):
                 return j["state"], j
             time.sleep(0.02)
         self.fail("analisi non terminata")
+
+    def test_export_filtered_pcap(self):
+        import app as app_module
+        data = pcap_file([
+            eth(ipv4("10.0.0.1", "10.0.0.2")),
+            eth(ipv4("10.0.0.9", "10.0.0.1")),
+            eth(ipv4("10.0.0.2", "10.0.0.8")),
+        ])
+        st = parse_bytes(data)
+        blob = app_module.build_filtered_pcap(st, selected_ip="10.0.0.1", selected_protocol="tcp")
+        self.assertTrue(blob.startswith((b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4")))
+        self.assertGreater(len(blob), 24)
 
     def test_raw_upload_generates_svg(self):
         state, j = self.analyze(pcap_file([eth(ipv4("10.0.0.1", "10.0.0.2"))] * 5),

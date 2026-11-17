@@ -49,6 +49,7 @@ class CaptureStats:
         self.pairs: Counter = Counter()  # (src_bytes, dst_bytes) -> n pacchetti
         self.protocols: Counter = Counter()
         self.protocol_pairs: dict[str, Counter] = {}
+        self.records: list[dict] = []
         self.packets = 0
         self.non_ip = 0
         self.truncated = False
@@ -72,6 +73,18 @@ class CaptureStats:
         protos = packet_protocols(data, linktype)
         for proto in protos:
             self.protocols[proto] += 1
+
+        record = {
+            "data": data,
+            "linktype": linktype,
+            "source": None,
+            "destination": None,
+            "protocols": set(protos),
+        }
+        if addrs is not None:
+            record["source"] = format_ip(addrs[0])
+            record["destination"] = format_ip(addrs[1])
+        self.records.append(record)
 
         if addrs is None:
             self.non_ip += 1

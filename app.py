@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 import logging
 import math
 import os
 import shutil
+import struct
 import tempfile
 import threading
 import time
@@ -13,7 +15,7 @@ from html import escape
 
 from urllib.parse import unquote
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
 from pcap_parser import PcapParseError, format_ip, parse_capture
@@ -42,14 +44,40 @@ JOB_TTL_SECONDS = 30 * 60
 ANALYSIS_SLOTS = threading.BoundedSemaphore(int(os.getenv("MAX_PARALLEL_ANALYSES", "2")))
 
 
+def sort_ip_addresses(values):
+    """Ordina gli IP in modo crescente, risolvendo anche valori con primo ottetto a 3 cifre."""
+    ordered = []
+    seen = set()
+    for value in values:
+        if value is None or value == "":
+            continue
+        if value not in seen:
+            seen.add(value)
+            ordered.append(value)
+
+    def key(item):
+        try:
+            value = ipaddress.ip_address(str(item))
+        except ValueError:
+            return (2, str(item))
+        if value.version == 4:
+            return (0, tuple(int(part) for part in str(value).split(".")))
+        return (1, value.packed)
+
+    return sorted(ordered, key=key)
+
+
 def build_graph(edge_counter):
     """edge_counter: Counter {(src, dst): n_pacchetti} -> {"nodes", "edges"}."""
     seen_nodes = OrderedDict()
     clean = Counter()
+    unique_ips = set()
 
     for (source, target), weight in edge_counter.items():
         if not source or not target or source == target:
             continue
+        unique_ips.add(source)
+        unique_ips.add(target)
         seen_nodes.setdefault(source, None)
         seen_nodes.setdefault(target, None)
         clean[(source, target)] += weight
@@ -58,12 +86,46 @@ def build_graph(edge_counter):
         {"source": s, "target": t, "weight": w}
         for (s, t), w in sorted(clean.items(), key=lambda i: (-i[1], i[0][0], i[0][1]))
     ]
-    return {"nodes": list(seen_nodes.keys()), "edges": edges}
+    return {"nodes": sort_ip_addresses(unique_ips), "edges": edges}
 
 
 def build_ip_edges(ip_pairs):
     """Compatibilita': accetta una lista di coppie (src, dst), anche ripetute."""
     return build_graph(Counter(ip_pairs))
+
+
+def packet_matches_selection(record, selected_ip="all", selected_protocol="all"):
+    if selected_ip not in ("all", None, ""):
+        if record.get("source") != selected_ip and record.get("destination") != selected_ip:
+            return False
+
+    if selected_protocol not in ("all", None, ""):
+        protocols = {str(name).lower() for name in record.get("protocols", set())}
+        if selected_protocol.lower() not in protocols:
+            return False
+
+    return True
+
+
+def build_filtered_pcap(stats, selected_ip="all", selected_protocol="all"):
+    """Costruisce un PCAP valido contenente i pacchetti filtrati dall'IP e dal protocollo selezionati."""
+    packets = []
+    linktype = 1
+    for record in getattr(stats, "records", []):
+        if record.get("source") is None and record.get("destination") is None:
+            continue
+        if not packet_matches_selection(record, selected_ip, selected_protocol):
+            continue
+        packets.append(record["data"])
+        if linktype == 1 and record.get("linktype") not in (None, 1):
+            linktype = record["linktype"]
+
+    header = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, linktype)
+    body = [header]
+    for packet in packets:
+        body.append(struct.pack("<IIII", 1, 0, len(packet), len(packet)))
+        body.append(packet)
+    return b"".join(body)
 
 
 def limit_graph(graph, max_nodes, max_edges):
@@ -313,6 +375,7 @@ def build_result(file_name, size, stats):
         size=size,
         svg=generate_svg_graph(shown),
         nodes=graph["nodes"][:MAX_PILLS],
+        ip_options=graph["nodes"],
         nodes_total=len(graph["nodes"]),
         edges=graph["edges"][:25],
         unique_ips=len(graph["nodes"]),
@@ -347,6 +410,7 @@ def run_job(job_id, tmp_path):
             job["started"] = time.time()
             app.logger.info("Analisi avviata: %r (%d byte)", job["file_name"], job["size"])
             stats = parse_capture(tmp_path, progress=on_progress, max_pairs=MAX_TRACKED_PAIRS)
+            job["stats"] = stats
             job["packets"] = stats.packets
             job["percent"] = 99
             job["result"] = build_result(job["file_name"], job["size"], stats)
@@ -541,11 +605,43 @@ def job_status(job_id):
         elapsed=round(time.time() - (job["started"] or job["created"]), 1),
     )
     if job["state"] == "done":
-        body["result"] = job["result"]
+        result = dict(job["result"])
+        result["job_id"] = job_id
+        body["result"] = result
     elif job["state"] == "error":
         body["error"] = job["error"]
         body["file_name"] = job["file_name"]
     return jsonify(body)
+
+
+@app.route("/api/jobs/<job_id>/export", methods=["POST"])
+def export_filtered_pcap(job_id):
+    job = JOBS.get(job_id)
+    if job is None:
+        return jsonify(error="Analisi non trovata: il server e' stato riavviato o l'analisi e' scaduta."), 404
+    if job.get("state") != "done":
+        return jsonify(error="L'analisi non e' ancora completata."), 409
+
+    payload = request.get_json(silent=True) or {}
+    selected_ip = str(payload.get("ip") or "all")
+    selected_protocol = str(payload.get("protocol") or "all")
+    stats = job.get("stats")
+    if stats is None:
+        return jsonify(error="Nessun pacchetto salvato per l'esportazione."), 409
+
+    blob = build_filtered_pcap(stats, selected_ip=selected_ip, selected_protocol=selected_protocol)
+    safe_name = os.path.basename(str(job.get("file_name") or "capture.pcap")).rsplit(".", 1)[0]
+    if not safe_name:
+        safe_name = "capture"
+    if selected_ip != "all":
+        safe_name = f"{safe_name}-{selected_ip.replace(':', '-')}.pcap"
+    elif selected_protocol != "all":
+        safe_name = f"{safe_name}-{selected_protocol}.pcap"
+    else:
+        safe_name = f"{safe_name}-all.pcap"
+    filename = safe_name.replace("/", "_")
+    return Response(blob, mimetype="application/vnd.tcpdump.pcap",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.route("/health", methods=["GET"])

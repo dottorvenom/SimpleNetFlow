@@ -125,30 +125,6 @@ The app processes the file in the background and exposes job state through the w
 
 > Large capture files are supported by design; if needed, increase or reduce the `MAX_UPLOAD_MB` environment variable before publishing or deploying the service.
 
-## API
-
-A simple health endpoint is available:
-
-```bash
-curl -s http://localhost:9977/health
-```
-
-The app also exposes capture-analysis endpoints for the frontend and for direct integration.
-
-## Testing
-
-```bash
-python -m unittest discover -s tests -t .
-```
-
-## Notes for repository publication
-
-Before publishing the repository on GitHub, it is recommended to add:
-
-- a license file such as `LICENSE`
-- a `.gitignore` file to exclude virtual environments, temporary files, and local upload data
-- a short description and topic tags in the GitHub repository settings
-
 ## Troubleshooting
 
 - If the upload does not start, verify that the app is running on the expected port.
@@ -157,7 +133,6 @@ Before publishing the repository on GitHub, it is recommended to add:
 
 ## Future improvements
 
-- protocol filters (TCP, UDP, ICMP, DNS, HTTP)
 - temporal traffic view
 - PNG export
 - support for NetFlow-style stream analysis

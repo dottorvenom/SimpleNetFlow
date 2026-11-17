@@ -16,6 +16,7 @@ const browserBanner = $('browser-banner');
 const svgWrapper = $('svg-wrapper');
 const emptyState = $('empty-state');
 const downloadButton = $('download-button');
+const exportPcapButton = $('export-pcap-button');
 const tablesPanel = $('tables-panel');
 
 const MAX_MB = Number(document.body.dataset.maxMb) || 2048;
@@ -357,11 +358,47 @@ function stat(label, value) {
   return item;
 }
 
+function ipToBigInt(ip) {
+  const value = String(ip || '').trim();
+  if (!value) return 0n;
+
+  if (value.includes(':')) {
+    const parts = value.toLowerCase().split('::');
+    const left = parts[0] ? parts[0].split(':').filter(Boolean) : [];
+    const right = parts[1] ? parts[1].split(':').filter(Boolean) : [];
+    const zeros = 8 - (left.length + right.length);
+    const groups = [...left, ...Array(zeros).fill('0'), ...right];
+    let acc = 0n;
+    for (const group of groups) {
+      acc = (acc << 16n) + BigInt(parseInt(group || '0', 16));
+    }
+    return acc;
+  }
+
+  const octets = value.split('.').map((part) => Number(part));
+  let acc = 0n;
+  for (const octet of octets) {
+    acc = (acc << 8n) + BigInt(octet);
+  }
+  return acc;
+}
+
+function sortIps(values) {
+  const unique = [...new Set((values || []).filter(Boolean))];
+  return unique.sort((a, b) => {
+    const left = ipToBigInt(a);
+    const right = ipToBigInt(b);
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return String(a).localeCompare(String(b));
+  });
+}
+
 function getProtocolGraph(data, protocol) {
   if (!data || !data.protocol_graphs) return { nodes: [], edges: [], nodes_total: 0, svg: '' };
   if (protocol === 'all') {
     return {
-      nodes: data.nodes || [],
+      nodes: sortIps(data.nodes || []),
       edges: data.edges || [],
       nodes_total: data.nodes_total || (data.nodes || []).length,
       svg: data.svg || '',
@@ -476,7 +513,9 @@ function renderResult(data) {
   allIpOption.value = 'all';
   allIpOption.textContent = 'ALL';
   ipFilter.appendChild(allIpOption);
-  (data.nodes || []).forEach((ip) => {
+
+  const ipOptions = Array.isArray(data.ip_options) && data.ip_options.length ? data.ip_options : (data.nodes || []);
+  sortIps(ipOptions).forEach((ip) => {
     const option = document.createElement('option');
     option.value = ip;
     option.textContent = ip;
@@ -534,6 +573,7 @@ function applyProtocolFilter(data, selectedProtocol) {
   svgWrapper.hidden = false;
   emptyState.hidden = true;
   downloadButton.disabled = false;
+  exportPcapButton.disabled = false;
   resetView();
   bindSvgIpSelection();
 
@@ -632,6 +672,41 @@ document.querySelectorAll('[data-action]').forEach((button) => {
     if (action === 'reset') resetView();
     if (action === 'download') downloadSvg();
   });
+});
+
+exportPcapButton.addEventListener('click', async () => {
+  if (!currentResult || !currentResult.job_id) {
+    showMessage('Nessun risultato pronto per esportare i pacchetti filtrati.', 'warn');
+    return;
+  }
+
+  const selectedIp = ipFilter ? (ipFilter.value || 'all') : 'all';
+  const selectedProtocol = protocolList ? (protocolList.value || 'all') : 'all';
+
+  try {
+    const response = await fetch(`/api/jobs/${currentResult.job_id}/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip: selectedIp, protocol: selectedProtocol }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || 'Esportazione non riuscita.');
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const name = `${(currentResult.file_name || 'capture').replace(/\.[^.]+$/, '')}-${selectedIp === 'all' ? 'all' : selectedIp.replace(/:/g, '-')}-${selectedProtocol === 'all' ? 'all' : selectedProtocol}.pcap`;
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showMessage(err.message || 'Esportazione PCAP non riuscita.', 'error');
+  }
 });
 
 svgWrapper.addEventListener('wheel', (event) => {
