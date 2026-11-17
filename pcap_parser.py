@@ -120,23 +120,47 @@ def packet_protocols(buf: bytes, linktype):
         elif proto == 132:
             seen.add("sctp")
 
+    def add_ip_at_offset(off: int):
+        if len(buf) < off + 1:
+            return
+        version = buf[off] >> 4
+        if version == 4:
+            seen.add("ipv4")
+            if len(buf) >= off + 20:
+                add_ip_transport(buf[off + 9], buf[off + 20:])
+        elif version == 6:
+            seen.add("ipv6")
+            if len(buf) >= off + 40:
+                add_ip_transport(buf[off + 6], buf[off + 40:])
+
+    def add_ethernet_frame(off: int, ethertype: int):
+        while ethertype in (0x8100, 0x88A8, 0x9100):
+            if len(buf) < off + 4:
+                return
+            ethertype = (buf[off + 2] << 8) | buf[off + 3]
+            off += 4
+
+        if ethertype == 0x0806:
+            seen.add("arp")
+        elif ethertype in (0x0800, 0x86DD):
+            add_ip_at_offset(off)
+        elif ethertype in (0x8847, 0x8848):
+            while True:
+                if len(buf) < off + 4:
+                    return
+                bottom = buf[off + 2] & 1
+                off += 4
+                if bottom:
+                    break
+            add_ip_at_offset(off)
+        elif ethertype == 0x8864:
+            if len(buf) >= off + 8:
+                add_ip_at_offset(off + 8)
+
     if linktype == LINKTYPE_ETHERNET:
         seen.add("ethernet")
         if len(buf) >= 14:
-            ethertype = (buf[12] << 8) | buf[13]
-            if ethertype == 0x0806:
-                seen.add("arp")
-            elif ethertype in (0x0800, 0x86DD):
-                ip_off = 14
-                version = buf[ip_off] >> 4
-                if version == 4:
-                    seen.add("ipv4")
-                    if len(buf) >= ip_off + 20:
-                        add_ip_transport(buf[ip_off + 9], buf[ip_off + 20:])
-                elif version == 6:
-                    seen.add("ipv6")
-                    if len(buf) >= ip_off + 40:
-                        add_ip_transport(buf[ip_off + 6], buf[ip_off + 40:])
+            add_ethernet_frame(14, (buf[12] << 8) | buf[13])
     elif linktype in (LINKTYPE_NULL, LINKTYPE_LOOP):
         seen.add("loopback")
         if len(buf) >= 4:

@@ -246,10 +246,11 @@ class TestApi(unittest.TestCase):
             eth(ipv4("10.0.0.1", "10.0.0.2")),
             eth(ipv6("2001:db8::1", "2001:db8::2"), 0x86DD),
             eth(b"\x00" * 28, 0x0806),
+            eth(ipv4("10.0.0.3", "10.0.0.4"), vlan=True),
         ])
         st = parse_bytes(data)
-        self.assertEqual(st.protocols["ethernet"], 3)
-        self.assertEqual(st.protocols["ipv4"], 1)
+        self.assertEqual(st.protocols["ethernet"], 4)
+        self.assertEqual(st.protocols["ipv4"], 2)
         self.assertEqual(st.protocols["ipv6"], 1)
         self.assertEqual(st.protocols["arp"], 1)
 
